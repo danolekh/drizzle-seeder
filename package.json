@@ -1,0 +1,56 @@
+{
+  "name": "drizzle-seeder",
+  "version": "0.1.0",
+  "keywords": [
+    "drizzle-orm",
+    "seeding",
+    "prisma"
+  ],
+  "homepage": "https://github.com/danolekh/drizzle-seeder#readme",
+  "bugs": {
+    "url": "https://github.com/danolekh/drizzle-seeder/issues"
+  },
+  "license": "MIT",
+  "author": "Daniil Olekh <danyaolekhq@gmail.com> (https://github.com/danolekh)",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/danolekh/drizzle-seeder"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "type": "module",
+  "main": "./dist/index.mjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    },
+    "./pg-core": {
+      "types": "./dist/pg-core/index.d.mts",
+      "import": "./dist/pg-core/index.mjs"
+    }
+  },
+  "scripts": {
+    "build": "tsdown",
+    "prepublishOnly": "bun run build",
+    "test": "bun test",
+    "check": "tsc --noEmit",
+    "publish": "npm publish",
+    "lint": "oxlint .",
+    "fmt": "oxfmt .",
+    "fmt:check": "oxfmt --check ."
+  },
+  "peerDependencies": {
+    "typescript": "^5",
+    "drizzle-orm": "^1.0.0",
+    "@faker-js/faker": "^10.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.6",
+    "tsdown": "^0.19.0"
+  }
+}
