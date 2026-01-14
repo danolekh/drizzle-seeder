@@ -1,11 +1,9 @@
-import { type ColumnType, is } from "drizzle-orm";
+import { is } from "drizzle-orm";
 import { getTableConfig, PgColumn, type PgTable } from "drizzle-orm/pg-core";
 import { faker } from "../faker";
-import {
-  type ColumnGenerator,
-  type ColumnGeneratorContext,
-  defaultDataTypeGenerators,
-} from "../generator";
+import type { ColumnGeneratorContext } from "../column-generator";
+import type { Generator } from "../generator";
+import { DefaultGenerators } from "./generator";
 
 type PgSchema = Record<string, PgTable | any>;
 
@@ -32,6 +30,7 @@ export type TableSeedConfig<
         tableName,
         table,
         column,
+        table["_"]["columns"][column],
         columnOrder
       >,
     ) => table["_"]["columns"][column]["_"]["notNull"] extends false
@@ -59,6 +58,7 @@ export type GenerateOptions<
 > = {
   tableOrder: tableOrder;
   seed?: number;
+  generators?: Generator;
 };
 
 export type GenerateResult<
@@ -81,7 +81,7 @@ export const generate = <
   inputSchema: schema,
   options: GenerateOptions<schema, tableOrder>,
 ): GenerateResult<schema, tableOrder> => {
-  const { tableOrder, seed = 0 } = options;
+  const { tableOrder, seed = 0, generators = DefaultGenerators } = options;
 
   const generateWithConfig = (
     config: RefineConfig<schema, tableOrder>,
@@ -132,20 +132,27 @@ export const generate = <
               columnTsKey as keyof typeof tableConfigUser.columns
             ];
 
-          const generator: ColumnGenerator<ColumnType> = refined
-            ? (refined as any)
-            : defaultDataTypeGenerators[columnConfig.dataType as ColumnType];
-
-          const ctx = {
+          const baseCtx = {
             index,
             count,
             faker,
+            columnDef: columnConfig,
             self,
             generatedRows,
             generatedSchema,
           };
 
-          const value = generator(ctx as any);
+          let value: unknown;
+
+          if (refined) {
+            const ctxWithSuper = {
+              ...baseCtx,
+              super: () => generators.resolve(baseCtx),
+            };
+            value = (refined as any)(ctxWithSuper as ColumnGeneratorContext);
+          } else {
+            value = generators.resolve(baseCtx);
+          }
 
           self[columnTsKey] = value;
         }

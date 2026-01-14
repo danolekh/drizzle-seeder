@@ -2,14 +2,13 @@
 
 Type-safe database seeding for [Drizzle ORM](https://orm.drizzle.team/).
 
+- works with drizzle@beta version
+- only postgres supported for now
+
 ## Installation
 
 ```bash
-npm install drizzle-seeder
-# or
 pnpm add drizzle-seeder
-# or
-bun add drizzle-seeder
 ```
 
 ## Usage
@@ -61,9 +60,11 @@ Each column generator function receives a context object with:
 - `index` - Current row index (0-based)
 - `count` - Total number of rows being generated
 - `faker` - Faker.js instance for generating random data
+- `columnDef` - Column definition from table
 - `self` - Already-generated columns for the current row
 - `generatedRows` - All previously generated rows for this table
 - `generatedSchema` - All generated data from tables earlier in `tableOrder`
+- `super` - Calls next by priority generator in the chain
 
 ### Generic Exports
 

@@ -1,213 +1,40 @@
-import type { ColumnType } from "drizzle-orm";
-import type { Table } from "drizzle-orm";
-import type { Faker } from "./faker";
+import type {
+  ColumnGeneratorContext,
+  RootGeneratorContext,
+} from "./column-generator";
 
-export type GetColumnDataType<CT extends ColumnType> =
-  CT extends `${infer DT} ${string}` ? DT : CT;
+type RootGeneratorFn = (ctx: RootGeneratorContext) => unknown;
+type ExtendedGeneratorFn = (ctx: ColumnGeneratorContext) => unknown;
 
-export type ColumnDataTypeToTsType = {
-  string: string;
-  number: number;
-  bigint: bigint;
-  boolean: boolean;
-  array: unknown[];
-  object: object;
-  custom: unknown;
-};
+export class Generator {
+  private chain: Array<RootGeneratorFn | ExtendedGeneratorFn>;
 
-export type InferTsType<CT extends ColumnType> =
-  GetColumnDataType<CT> extends keyof ColumnDataTypeToTsType
-    ? ColumnDataTypeToTsType[GetColumnDataType<CT>]
-    : unknown;
+  private constructor(chain: Array<RootGeneratorFn | ExtendedGeneratorFn>) {
+    this.chain = chain;
+  }
 
-export type GetElementsBefore<
-  Order extends readonly any[],
-  Target,
-  Acc extends any[] = [],
-> = Order extends readonly [infer Head, ...infer Tail]
-  ? Head extends Target
-    ? Acc
-    : GetElementsBefore<Tail, Target, [...Acc, Head]>
-  : Acc;
+  static create(rootFn: RootGeneratorFn): Generator {
+    return new Generator([rootFn]);
+  }
 
-export type ColumnGeneratorContext<
-  schema extends Record<string, Table> = Record<string, Table>,
-  tableOrder extends readonly (keyof schema)[] = readonly (keyof schema)[],
-  tableName extends keyof schema = keyof schema,
-  table extends Table = Table,
-  column extends keyof table["_"]["columns"] = keyof table["_"]["columns"],
-  columnOrder extends
-    readonly (keyof table["_"]["columns"])[] = readonly (keyof table["_"]["columns"])[],
-> = {
-  /** Current row index (0-based) */
-  index: number;
+  extend(fn: ExtendedGeneratorFn): Generator {
+    return new Generator([...this.chain, fn]);
+  }
 
-  /** Total count of rows being generated for this table */
-  count: number;
+  resolve(baseCtx: RootGeneratorContext): unknown {
+    let superFn: (() => unknown) | undefined;
 
-  /** Faker instance for generating random data */
-  faker: Faker;
+    for (let i = 0; i < this.chain.length; i++) {
+      const fn = this.chain[i]!;
+      const prevSuper = superFn;
 
-  /** Already-generated columns for current row (based on columnOrder) */
-  self: {
-    [K in GetElementsBefore<
-      columnOrder,
-      column
-    >[number]]: K extends keyof table["_"]["columns"]
-      ? table["_"]["columns"][K]["_"]["data"]
-      : never;
-  };
+      if (i === 0) {
+        superFn = () => fn(baseCtx as any);
+      } else {
+        superFn = () => fn({ ...baseCtx, super: prevSuper! } as any);
+      }
+    }
 
-  /** All previously generated rows for this table */
-  generatedRows: Array<{
-    [col in keyof table["_"]["columns"]]: table["_"]["columns"][col]["_"]["data"];
-  }>;
-
-  /** All generated data from tables that came before this one in tableOrder */
-  generatedSchema: {
-    [T in GetElementsBefore<
-      tableOrder,
-      tableName
-    >[number]]: T extends keyof schema
-      ? Array<{
-          [col in keyof schema[T]["_"]["columns"]]: schema[T]["_"]["columns"][col]["_"]["data"];
-        }>
-      : never;
-  };
-};
-
-export type ColumnGenerator<dataType extends ColumnType> = (
-  ctx: ColumnGeneratorContext,
-) => InferTsType<dataType>;
-
-export const defaultDataTypeGenerators: {
-  [columnType in ColumnType]: ColumnGenerator<columnType>;
-} = {
-  // ─────────────────────────────────────────────────────────────────────────
-  // Base types
-  // ─────────────────────────────────────────────────────────────────────────
-  boolean: ({ faker }) => faker.datatype.boolean(),
-  number: ({ faker }) => faker.number.int({ min: 0, max: 1000 }),
-  bigint: ({ faker }) => BigInt(faker.number.int({ min: 0, max: 1000000 })),
-  string: ({ index }) => `string_${index}`,
-  array: () => [],
-  object: () => ({}),
-  custom: () => null,
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // Array constraints
-  // ─────────────────────────────────────────────────────────────────────────
-  "array vector": ({ faker }) =>
-    Array.from({ length: 3 }, () => faker.number.float()),
-  "array int64vector": ({ faker }) =>
-    Array.from({ length: 3 }, () => BigInt(faker.number.int({ max: 100 }))),
-  "array halfvector": ({ faker }) =>
-    Array.from({ length: 3 }, () => faker.number.float()),
-  "array basecolumn": () => [],
-  "array point": ({ faker }) => [
-    faker.number.float({ max: 100 }),
-    faker.number.float({ max: 100 }),
-  ],
-  "array geometry": () => [],
-  "array line": () => [],
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // BigInt constraints
-  // ─────────────────────────────────────────────────────────────────────────
-  "bigint int64": ({ faker }) => BigInt(faker.number.int()),
-  "bigint uint64": ({ faker }) => BigInt(faker.number.int({ min: 0 })),
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // Number constraints
-  // ─────────────────────────────────────────────────────────────────────────
-  "number double": ({ faker }) => faker.number.float({ min: -1000, max: 1000 }),
-  "number float": ({ faker }) => faker.number.float({ min: -1000, max: 1000 }),
-  "number int8": ({ faker }) => faker.number.int({ min: -128, max: 127 }),
-  "number int16": ({ faker }) => faker.number.int({ min: -32768, max: 32767 }),
-  "number int24": ({ faker }) =>
-    faker.number.int({ min: -8388608, max: 8388607 }),
-  "number int32": ({ faker }) =>
-    faker.number.int({ min: -2147483648, max: 2147483647 }),
-  "number int53": ({ faker }) => faker.number.int(),
-  "number udouble": ({ faker }) => faker.number.float({ min: 0, max: 1000 }),
-  "number ufloat": ({ faker }) => faker.number.float({ min: 0, max: 1000 }),
-  "number uint8": ({ faker }) => faker.number.int({ min: 0, max: 255 }),
-  "number uint16": ({ faker }) => faker.number.int({ min: 0, max: 65535 }),
-  "number uint24": ({ faker }) => faker.number.int({ min: 0, max: 16777215 }),
-  "number uint32": ({ faker }) => faker.number.int({ min: 0, max: 4294967295 }),
-  "number uint53": ({ faker }) => faker.number.int({ min: 0 }),
-  "number unsigned": ({ faker }) => faker.number.int({ min: 0, max: 1000 }),
-  "number year": ({ faker }) => faker.number.int({ min: 1970, max: 2030 }),
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // Object constraints
-  // ─────────────────────────────────────────────────────────────────────────
-  "object buffer": ({ index }) => Buffer.from(`buffer_${index}`),
-  "object date": ({ faker }) => faker.date.past(),
-  "object geometry": ({ faker }) => ({
-    type: "Point",
-    coordinates: [
-      faker.number.float({ max: 180 }),
-      faker.number.float({ max: 90 }),
-    ],
-  }),
-  "object json": ({ faker, index }) => ({
-    id: index,
-    value: faker.lorem.word(),
-  }),
-  "object line": ({ faker }) => ({
-    start: [0, 0],
-    end: [faker.number.float({ max: 100 }), faker.number.float({ max: 100 })],
-  }),
-  "object point": ({ faker }) => ({
-    x: faker.number.float({ max: 100 }),
-    y: faker.number.float({ max: 100 }),
-  }),
-  // Gel-specific
-  "object dateDuration": ({ faker }) => ({
-    days: faker.number.int({ min: 0, max: 365 }),
-  }),
-  "object duration": ({ faker }) => ({
-    milliseconds: faker.number.int({ min: 0, max: 86400000 }),
-  }),
-  "object localDate": ({ faker }) => faker.date.anytime(),
-  "object localDateTime": ({ faker }) => faker.date.anytime(),
-  "object localTime": ({ faker }) => faker.date.anytime(),
-  "object relDuration": ({ faker }) => ({
-    milliseconds: faker.number.int({ min: 0, max: 86400000 }),
-  }),
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // String constraints
-  // ─────────────────────────────────────────────────────────────────────────
-  "string binary": ({ index }) =>
-    Buffer.from(`bin_${index}`).toString("base64"),
-  "string cidr": ({ faker }) => `${faker.internet.ipv4()}/24`,
-  "string date": ({ faker }) =>
-    faker.date.anytime().toISOString().split("T")[0]!,
-  "string datetime": ({ faker }) => faker.date.anytime().toISOString(),
-  "string enum": () => "value", // Needs column-specific handling
-  "string inet": ({ faker }) => faker.internet.ipv4(),
-  "string int64": ({ faker }) => String(faker.number.int()),
-  "string interval": ({ faker }) =>
-    `${faker.number.int({ min: 1, max: 30 })} days`,
-  "string macaddr": ({ faker }) => faker.internet.mac(),
-  "string macaddr8": ({ faker }) => `${faker.internet.mac()}:00:00`,
-  "string numeric": ({ faker }) =>
-    faker.number.float({ min: 0, max: 10000, fractionDigits: 2 }).toFixed(2),
-  "string sparsevec": ({ faker }) =>
-    `{1:${faker.number.float({ fractionDigits: 2 }).toFixed(2)},2:${faker.number
-      .float({ fractionDigits: 2 })
-      .toFixed(2)}}`,
-  "string time": ({ faker }) => {
-    const h = faker.number.int({ min: 0, max: 23 }).toString().padStart(2, "0");
-    const m = faker.number.int({ min: 0, max: 59 }).toString().padStart(2, "0");
-    const s = faker.number.int({ min: 0, max: 59 }).toString().padStart(2, "0");
-    return `${h}:${m}:${s}`;
-  },
-  "string timestamp": ({ faker }) => faker.date.anytime().toISOString(),
-  "string uint64": ({ faker }) => String(faker.number.int({ min: 0 })),
-  "string unumeric": ({ faker }) =>
-    faker.number.float({ min: 0, max: 10000, fractionDigits: 2 }).toFixed(2),
-  "string uuid": ({ faker }) => faker.string.uuid(),
-};
+    return superFn!();
+  }
+}

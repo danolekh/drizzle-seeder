@@ -6,4 +6,6 @@ export type {
   GenerateResult,
 } from "./seed.js";
 
+export { DefaultGenerators } from "./generator.js";
+
 export { reset } from "./reset.js";
