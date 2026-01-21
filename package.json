@@ -1,6 +1,6 @@
 {
   "name": "drizzle-seeder",
-  "version": "0.2",
+  "version": "0.2.0",
   "keywords": [
     "drizzle-orm",
     "prisma",
