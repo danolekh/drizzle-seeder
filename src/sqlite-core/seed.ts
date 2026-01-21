@@ -1,5 +1,9 @@
-import type { getPossibleRefs, getTablesFromSchemaExport, SchemaExport } from "../shared";
-import type { PgGenerator } from "./generate";
+import type {
+  getPossibleRefs,
+  getTablesFromSchemaExport,
+  SchemaExport,
+} from "../shared";
+import type { SqliteGenerator } from "./generate";
 import {
   isColumnValueReference,
   isGeneratedAsPlaceholder,
@@ -10,13 +14,14 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { unlinkSync } from "fs";
 import Database from "better-sqlite3";
-import type { PgTable } from "drizzle-orm/pg-core";
+import type { SQLiteTable } from "drizzle-orm/sqlite-core";
 import { stringify, parse } from "devalue";
 
-const PG_MAX_PARAMETERS = 65535;
+const SQLITE_MAX_PARAMETERS = 999;
 
+// Database type that supports insert operations
 type DrizzleDb = {
-  insert: (table: PgTable) => {
+  insert: (table: SQLiteTable) => {
     values: (values: Record<string, unknown>[]) => Promise<unknown>;
   };
 };
@@ -37,7 +42,7 @@ type QueuedChunk = {
   pendingRefs: ColumnValueReference<unknown>[];
 };
 
-class PgSeeder<
+class SqliteSeeder<
   schema extends SchemaExport,
   const tableOrder extends readonly getTablesFromSchemaExport<schema>[],
   refs extends Array<getPossibleRefs<schema, tableOrder>>,
@@ -45,18 +50,18 @@ class PgSeeder<
   private refsConfig: Map<string, Set<string>>;
   private executionId = randomUUID();
   private schema: schema;
-  private generator: PgGenerator<schema, tableOrder, refs>;
+  private generator: SqliteGenerator<schema, tableOrder, refs>;
 
   constructor(
     private db: DrizzleDb,
-    generator: PgGenerator<schema, tableOrder, refs>,
+    generator: SqliteGenerator<schema, tableOrder, refs>,
   ) {
     this.generator = generator;
     this.schema = generator.getSchema();
     const refineConfig = generator.getRefineConfig();
 
+    // Parse refs config into a map of tableName -> Set<columnName>
     this.refsConfig = new Map();
-
     if (refineConfig) {
       for (const ref of refineConfig.refs) {
         const parts = (ref as string).split(".");
@@ -73,7 +78,7 @@ class PgSeeder<
   }
 
   private getBatchSizeForTable(columnCount: number): number {
-    return Math.floor(PG_MAX_PARAMETERS / columnCount);
+    return Math.floor(SQLITE_MAX_PARAMETERS / columnCount);
   }
 
   // eslint-ignore
@@ -88,6 +93,7 @@ class PgSeeder<
     const tempPath = join(tmpdir(), `drizzle-seeder-${this.executionId}.db`);
     const db = new Database(tempPath);
 
+    // Create tables for each referenced table
     for (const [tableName, columns] of this.refsConfig) {
       const cols = Array.from(columns)
         .map((c) => `"${c}" TEXT`)
@@ -110,7 +116,9 @@ class PgSeeder<
     return { db, cleanup };
   }
 
-  private extractRefs(chunk: Record<string, unknown>): ColumnValueReference<unknown>[] {
+  private extractRefs(
+    chunk: Record<string, unknown>,
+  ): ColumnValueReference<unknown>[] {
     const refs: ColumnValueReference<unknown>[] = [];
     for (const value of Object.values(chunk)) {
       if (isColumnValueReference(value)) {
@@ -120,13 +128,21 @@ class PgSeeder<
     return refs;
   }
 
-  private refExists(ref: ColumnValueReference<unknown>, sqliteDb: Database.Database): boolean {
-    const stmt = sqliteDb.prepare(`SELECT 1 FROM "${ref.refTableName}" WHERE _rowIndex = ?`);
+  private refExists(
+    ref: ColumnValueReference<unknown>,
+    sqliteDb: Database.Database,
+  ): boolean {
+    const stmt = sqliteDb.prepare(
+      `SELECT 1 FROM "${ref.refTableName}" WHERE _rowIndex = ?`,
+    );
     const row = stmt.get(ref.refRowIndex);
     return row !== undefined;
   }
 
-  private resolveRef(ref: ColumnValueReference<unknown>, sqliteDb: Database.Database): unknown {
+  private resolveRef(
+    ref: ColumnValueReference<unknown>,
+    sqliteDb: Database.Database,
+  ): unknown {
     const stmt = sqliteDb.prepare(
       `SELECT "${ref.refColumnName}" FROM "${ref.refTableName}" WHERE _rowIndex = ?`,
     );
@@ -180,13 +196,15 @@ class PgSeeder<
   ): Promise<void> {
     if (tableState.batch.length === 0) return;
 
-    const table = this.schema[tableName] as PgTable;
+    const table = this.schema[tableName] as SQLiteTable;
     if (!table) {
       throw new Error(`Table "${tableName}" not found in schema`);
     }
 
     // Resolve all chunks in batch
-    const resolvedBatch = tableState.batch.map((chunk) => this.resolveChunk(chunk, sqliteDb));
+    const resolvedBatch = tableState.batch.map((chunk) =>
+      this.resolveChunk(chunk, sqliteDb),
+    );
 
     // Insert into database
     await this.db.insert(table).values(resolvedBatch);
@@ -388,7 +406,7 @@ export const seed = <
   refs extends Array<getPossibleRefs<schema, tableOrder>>,
 >(
   db: DrizzleDb,
-  generator: PgGenerator<schema, tableOrder, refs>,
+  generator: SqliteGenerator<schema, tableOrder, refs>,
 ) => {
-  return new PgSeeder(db, generator);
+  return new SqliteSeeder(db, generator);
 };

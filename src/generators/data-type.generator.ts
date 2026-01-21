@@ -1,9 +1,7 @@
 import type { ColumnType } from "drizzle-orm";
-import type { ColumnGeneratorContext } from ".";
-import { Generator } from "./generator";
+import { BaseGenerator, type ExtendedGeneratorContext } from "./base.generator";
 
-export type GetColumnDataType<CT extends ColumnType> =
-  CT extends `${infer DT} ${string}` ? DT : CT;
+export type GetColumnDataType<CT extends ColumnType> = CT extends `${infer DT} ${string}` ? DT : CT;
 
 export type ColumnDataTypeToTsType = {
   string: string;
@@ -20,13 +18,36 @@ export type InferTsType<CT extends ColumnType> =
     ? ColumnDataTypeToTsType[GetColumnDataType<CT>]
     : unknown;
 
-export type ColumnDataTypeGenerator<dataType extends ColumnType> = (
-  ctx: ColumnGeneratorContext,
-) => InferTsType<dataType>;
+export type DataTypeGeneratorFn<CT extends ColumnType = ColumnType> = (
+  ctx: ExtendedGeneratorContext,
+) => InferTsType<CT>;
 
-export const defaultColumnDataTypeGenerators: {
-  [columnType in ColumnType]: ColumnDataTypeGenerator<columnType>;
-} = {
+export type DataTypeGeneratorsMap = {
+  [CT in ColumnType]: DataTypeGeneratorFn<CT>;
+};
+
+export class DataTypeGenerator extends BaseGenerator {
+  constructor(readonly generatorsMap: DataTypeGeneratorsMap) {
+    super();
+  }
+
+  generate(ctx: ExtendedGeneratorContext): unknown {
+    const generator = this.generatorsMap[ctx.columnDef.dataType];
+    if (!generator) {
+      throw new Error(`No generator for dataType: ${ctx.columnDef.dataType}`);
+    }
+    return generator(ctx);
+  }
+
+  refine(refinements: Partial<DataTypeGeneratorsMap>): DataTypeGenerator {
+    return new DataTypeGenerator({
+      ...this.generatorsMap,
+      ...refinements,
+    });
+  }
+}
+
+export const defaultDataTypeGeneratorsMap: DataTypeGeneratorsMap = {
   // Base types
   boolean: ({ faker }) => faker.datatype.boolean(),
   number: ({ faker }) => faker.number.int({ min: 0, max: 1000 }),
@@ -37,12 +58,10 @@ export const defaultColumnDataTypeGenerators: {
   custom: () => null,
 
   // Array constraints
-  "array vector": ({ faker }) =>
-    Array.from({ length: 3 }, () => faker.number.float()),
+  "array vector": ({ faker }) => Array.from({ length: 3 }, () => faker.number.float()),
   "array int64vector": ({ faker }) =>
     Array.from({ length: 3 }, () => BigInt(faker.number.int({ max: 100 }))),
-  "array halfvector": ({ faker }) =>
-    Array.from({ length: 3 }, () => faker.number.float()),
+  "array halfvector": ({ faker }) => Array.from({ length: 3 }, () => faker.number.float()),
   "array basecolumn": () => [],
   "array point": ({ faker }) => [
     faker.number.float({ max: 100 }),
@@ -60,10 +79,8 @@ export const defaultColumnDataTypeGenerators: {
   "number float": ({ faker }) => faker.number.float({ min: -1000, max: 1000 }),
   "number int8": ({ faker }) => faker.number.int({ min: -128, max: 127 }),
   "number int16": ({ faker }) => faker.number.int({ min: -32768, max: 32767 }),
-  "number int24": ({ faker }) =>
-    faker.number.int({ min: -8388608, max: 8388607 }),
-  "number int32": ({ faker }) =>
-    faker.number.int({ min: -2147483648, max: 2147483647 }),
+  "number int24": ({ faker }) => faker.number.int({ min: -8388608, max: 8388607 }),
+  "number int32": ({ faker }) => faker.number.int({ min: -2147483648, max: 2147483647 }),
   "number int53": ({ faker }) => faker.number.int(),
   "number udouble": ({ faker }) => faker.number.float({ min: 0, max: 1000 }),
   "number ufloat": ({ faker }) => faker.number.float({ min: 0, max: 1000 }),
@@ -80,10 +97,7 @@ export const defaultColumnDataTypeGenerators: {
   "object date": ({ faker }) => faker.date.past(),
   "object geometry": ({ faker }) => ({
     type: "Point",
-    coordinates: [
-      faker.number.float({ max: 180 }),
-      faker.number.float({ max: 90 }),
-    ],
+    coordinates: [faker.number.float({ max: 180 }), faker.number.float({ max: 90 })],
   }),
   "object json": ({ faker, index }) => ({
     id: index,
@@ -112,17 +126,14 @@ export const defaultColumnDataTypeGenerators: {
   }),
 
   // String constraints
-  "string binary": ({ index }) =>
-    Buffer.from(`bin_${index}`).toString("base64"),
+  "string binary": ({ index }) => Buffer.from(`bin_${index}`).toString("base64"),
   "string cidr": ({ faker }) => `${faker.internet.ipv4()}/24`,
-  "string date": ({ faker }) =>
-    faker.date.anytime().toISOString().split("T")[0]!,
+  "string date": ({ faker }) => faker.date.anytime().toISOString().split("T")[0]!,
   "string datetime": ({ faker }) => faker.date.anytime().toISOString(),
   "string enum": () => "value", // Needs column-specific handling
   "string inet": ({ faker }) => faker.internet.ipv4(),
   "string int64": ({ faker }) => String(faker.number.int()),
-  "string interval": ({ faker }) =>
-    `${faker.number.int({ min: 1, max: 30 })} days`,
+  "string interval": ({ faker }) => `${faker.number.int({ min: 1, max: 30 })} days`,
   "string macaddr": ({ faker }) => faker.internet.mac(),
   "string macaddr8": ({ faker }) => `${faker.internet.mac()}:00:00`,
   "string numeric": ({ faker }) =>
@@ -144,12 +155,4 @@ export const defaultColumnDataTypeGenerators: {
   "string uuid": ({ faker }) => faker.string.uuid(),
 };
 
-export const DataTypeGenerator = Generator.create((ctx) => {
-  const generator = defaultColumnDataTypeGenerators[ctx.columnDef.dataType];
-
-  if (!generator) {
-    throw new Error(`No generator for dataType: ${ctx.columnDef.dataType}`);
-  }
-
-  return generator(ctx as ColumnGeneratorContext);
-});
+export const DefaultDataTypeGenerator = new DataTypeGenerator(defaultDataTypeGeneratorsMap);
