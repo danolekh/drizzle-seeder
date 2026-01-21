@@ -26,11 +26,11 @@ const REVIEW_PROBABILITY = 0.6;
 const AVG_REVIEWS_PER_BOOK = 2;
 
 const generator = generate(schema, {
-  tableOrder: ["books", "reviews", "notes"] as const,
+  tableOrder: ["books", "reviews", "notes"],
   seed: 42,
 }).refine({
   // Define what columns will be potentially referenced by others
-  refs: ["books.id"] as const,
+  refs: ["books.id"],
   tables: {
     books: {
       count: BOOK_COUNT,
