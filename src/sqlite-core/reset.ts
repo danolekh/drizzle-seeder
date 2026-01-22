@@ -1,13 +1,12 @@
 import { getTableName, is, sql } from "drizzle-orm";
-import { PgTable } from "drizzle-orm/pg-core";
-import type { BaseSQLiteDatabase, SQLiteTable } from "drizzle-orm/sqlite-core";
+import { type BaseSQLiteDatabase, SQLiteTable } from "drizzle-orm/sqlite-core";
 
 export const reset = async (
   db: BaseSQLiteDatabase<any, any>,
   schema: Record<string, SQLiteTable | any>,
 ) => {
   const tablesToTruncate = Object.values(schema)
-    .filter((ent) => is(ent, PgTable))
+    .filter((ent) => is(ent, SQLiteTable))
     .map((table) => {
       return getTableName(table);
     });
